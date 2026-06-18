@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from mangum import Mangum
 import razorpay
 import hmac
 import hashlib
@@ -14,7 +13,7 @@ ADMIN_SECRET        = os.getenv("ADMIN_SECRET",        "shilavive_admin_2026")
 
 client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
-app = FastAPI(title="Shila Vive Backend")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,7 +42,7 @@ class VerifyPaymentRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "Shila Vive backend running ✅"}
+    return {"status": "Shila Vive backend running OK"}
 
 @app.post("/create-order")
 def create_order(req: CreateOrderRequest):
@@ -58,7 +57,6 @@ def create_order(req: CreateOrderRequest):
                 "customer_email": req.email,
                 "customer_phone": req.phone,
                 "quantity":       str(req.quantity),
-                "product":        "Pure Himalayan Shilajit 100g Natural Resin"
             }
         })
         orders[rzp_order["id"]] = {
@@ -87,22 +85,18 @@ def verify_payment(req: VerifyPaymentRequest):
         body.encode(),
         hashlib.sha256
     ).hexdigest()
-
     if not hmac.compare_digest(expected, req.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
-
     if req.razorpay_order_id in orders:
         orders[req.razorpay_order_id].update({
             "payment_id": req.razorpay_payment_id,
             "status":     "paid",
             "paid_at":    datetime.now().isoformat()
         })
-
     return {
         "status":     "success",
         "order_id":   req.razorpay_order_id,
         "payment_id": req.razorpay_payment_id,
-        "message":    "Payment verified successfully"
     }
 
 @app.get("/orders")
@@ -110,7 +104,3 @@ def list_orders(secret: str = ""):
     if secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     return {"total": len(orders), "orders": list(orders.values())}
-
-# Vercel handler
-handler = Mangum(app)
-
