@@ -1,17 +1,17 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 import razorpay
 import hmac
 import hashlib
-import json
 import os
 from datetime import datetime
 
 # ── Config ────────────────────────────────────────────────
-RAZORPAY_KEY_ID     = os.getenv("RAZORPAY_KEY_ID",     "rzp_test_T2kRiGx2IBDi0x")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET",  "seKtE77oHWStBrXKsuYyYWDx")
-FRONTEND_URL        = os.getenv("FRONTEND_URL",         "https://shila-vive.com")
+RAZORPAY_KEY_ID     = os.getenv("RAZORPAY_KEY_ID",    "rzp_test_T2kRiGx2IBDi0x")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "seKtE77oHWStBrXKsuYyYWDx")
+FRONTEND_URL        = os.getenv("FRONTEND_URL",        "https://www.shila-vive.com")
+ADMIN_SECRET        = os.getenv("ADMIN_SECRET",        "shilavive_admin_2026")
 
 client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -19,21 +19,21 @@ app = FastAPI(title="Shila Vive Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten to FRONTEND_URL after testing
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── In-memory order store (replace with DB later) ─────────
+# ── In-memory order store ─────────────────────────────────
 orders = {}
 
 # ── Schemas ───────────────────────────────────────────────
 class CreateOrderRequest(BaseModel):
-    amount: int          # INR, e.g. 999
+    amount:   int
     quantity: int
-    name: str
-    email: str
-    phone: str
+    name:     str
+    email:    str
+    phone:    str
 
 class VerifyPaymentRequest(BaseModel):
     razorpay_order_id:   str
@@ -53,7 +53,7 @@ def root():
 @app.post("/create-order")
 def create_order(req: CreateOrderRequest):
     try:
-        amount_paise = req.amount * 100   # Razorpay needs paise
+        amount_paise = req.amount * 100
         rzp_order = client.order.create({
             "amount":   amount_paise,
             "currency": "INR",
@@ -66,21 +66,20 @@ def create_order(req: CreateOrderRequest):
                 "product":        "Pure Himalayan Shilajit 100g Natural Resin"
             }
         })
-        # store locally
         orders[rzp_order["id"]] = {
-            "order_id":    rzp_order["id"],
-            "amount_inr":  req.amount,
-            "quantity":    req.quantity,
-            "name":        req.name,
-            "email":       req.email,
-            "phone":       req.phone,
-            "status":      "created",
-            "created_at":  datetime.now().isoformat()
+            "order_id":   rzp_order["id"],
+            "amount_inr": req.amount,
+            "quantity":   req.quantity,
+            "name":       req.name,
+            "email":      req.email,
+            "phone":      req.phone,
+            "status":     "created",
+            "created_at": datetime.now().isoformat()
         }
         return {
-            "order_id":    rzp_order["id"],
+            "order_id":     rzp_order["id"],
             "amount_paise": amount_paise,
-            "currency":    "INR"
+            "currency":     "INR"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -88,9 +87,8 @@ def create_order(req: CreateOrderRequest):
 
 @app.post("/verify-payment")
 def verify_payment(req: VerifyPaymentRequest):
-    # Razorpay signature verification
-    body        = f"{req.razorpay_order_id}|{req.razorpay_payment_id}"
-    expected    = hmac.new(
+    body     = f"{req.razorpay_order_id}|{req.razorpay_payment_id}"
+    expected = hmac.new(
         RAZORPAY_KEY_SECRET.encode(),
         body.encode(),
         hashlib.sha256
@@ -99,7 +97,6 @@ def verify_payment(req: VerifyPaymentRequest):
     if not hmac.compare_digest(expected, req.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
-    # Update order record
     if req.razorpay_order_id in orders:
         orders[req.razorpay_order_id].update({
             "payment_id": req.razorpay_payment_id,
@@ -117,8 +114,6 @@ def verify_payment(req: VerifyPaymentRequest):
 
 @app.get("/orders")
 def list_orders(secret: str = ""):
-    # simple admin protection — set ADMIN_SECRET env var on Railway
-    admin_secret = os.getenv("ADMIN_SECRET", "shilavive123")
-    if secret != admin_secret:
+    if secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     return {"total": len(orders), "orders": list(orders.values())}
